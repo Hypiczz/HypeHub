@@ -1,0 +1,135 @@
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local Camera = Workspace.CurrentCamera
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local LocalPlayer = Players.LocalPlayer
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local Humanoid = Character:WaitForChild("Humanoid")
+
+-- Create a Drawing object for the FOV circle
+local fovCircle = Drawing.new("Circle")
+fovCircle.Thickness = 2
+fovCircle.Radius = 100 -- Adjust the radius to your preference
+fovCircle.Color = Color3.fromRGB(54, 0, 198) -- Blue color
+fovCircle.Filled = false
+fovCircle.Transparency = 1 -- Fully visible
+
+-- Cache for player highlights
+local highlights = {}
+
+-- Function to update the FOV circle position
+local function updateFovCircle()
+    local screenCenter = Camera.ViewportSize / 2
+    fovCircle.Position = Vector2.new(screenCenter.X, screenCenter.Y)
+    fovCircle.Visible = true
+end
+
+-- Function to create and apply highlights to a player's character
+local function createHighlightForCharacter(character)
+    for _, part in ipairs(character:GetChildren()) do
+        if part:IsA("BasePart") then
+            local highlight = Instance.new("Highlight")
+            highlight.Adornee = character -- Highlight the entire character
+            highlight.Parent = character
+
+            -- Customize the highlight's appearance
+            highlight.FillColor = Color3.fromRGB(255, 0, 0)  -- Red color
+            highlight.FillTransparency = 0.7                 -- Semi-transparent fill
+            highlight.OutlineColor = Color3.fromRGB(255, 0, 0) -- Red outline
+            highlight.OutlineTransparency = 0.5                -- Semi-transparent outline
+
+            -- Store the highlight for later cleanup
+            table.insert(highlights[character], highlight)
+        end
+    end
+end
+
+-- Function to highlight a player
+local function highlightPlayer(player)
+    local character = player.Character
+    if character then
+        -- Remove old highlights to prevent duplicates
+        if highlights[character] then
+            for _, highlight in ipairs(highlights[character]) do
+                highlight:Destroy()
+            end
+            highlights[character] = nil
+        end
+
+        -- Create new highlights for the character
+        highlights[character] = {}
+        createHighlightForCharacter(character)
+    end
+end
+
+-- Cleanup highlights when players leave
+Players.PlayerRemoving:Connect(function(player)
+    if player.Character and highlights[player.Character] then
+        for _, highlight in ipairs(highlights[player.Character]) do
+            highlight:Destroy()
+        end
+        highlights[player.Character] = nil
+    end
+end)
+
+-- Function to check if a player's head is within the FOV circle
+local function isPlayerHeadInFov(player)
+    local character = player.Character
+    if not character then return false end
+
+    local head = character:FindFirstChild("Head")
+    if not head then return false end
+
+    local screenPosition, onScreen = Camera:WorldToViewportPoint(head.Position)
+    if onScreen then
+        local screenCenter = Camera.ViewportSize / 2
+        local distanceFromCenter = (Vector2.new(screenPosition.X, screenPosition.Y) - Vector2.new(screenCenter.X, screenCenter.Y)).Magnitude
+        return distanceFromCenter <= fovCircle.Radius
+    end
+    return false
+end
+
+-- Function to lock the camera onto a player's head when in FOV
+local function lockCameraOnHead(player)
+    local character = player.Character
+    if character then
+        local head = character:FindFirstChild("Head")
+        if head then
+            Camera.CFrame = CFrame.new(Camera.CFrame.Position, head.Position)
+        end
+    end
+end
+
+-- Enable infinite jump
+UserInputService.JumpRequest:Connect(function()
+    if Humanoid then
+        Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+    end
+end)
+
+-- Main loop for rendering and FOV updates
+RunService.RenderStepped:Connect(function()
+    updateFovCircle()
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            if isPlayerHeadInFov(player) then
+                lockCameraOnHead(player)
+            end
+        end
+    end
+end)
+
+-- Refresh highlights for all players every 2 seconds
+task.spawn(function()
+    while true do
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character then
+                highlightPlayer(player)
+            end
+        end
+        task.wait(2) -- Reload highlights every 2 seconds
+    end
+end)
